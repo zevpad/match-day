@@ -1241,7 +1241,7 @@ function endMatchNow() {
 function enterStoppage() {
   App.set("stoppage", { force: App.state !== "live" });
   $("#sb-status").textContent = T().stoppageStatus;
-  AudioEngine.whistleShort();
+  // visual only — the song is playing; the +1 board needs no extra sound
   renderStoppageCount(remainingSec());
 }
 
