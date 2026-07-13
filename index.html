@@ -133,6 +133,10 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 24px;
     color: var(--text-dim);
+    /* iOS Safari: a 3s hold must not trigger callouts/selection or scroll,
+       which fire pointercancel and silently kill the hold */
+    touch-action: none;
+    -webkit-touch-callout: none;
   }
   .gate-ring {
     position: absolute; inset: -4px;
@@ -460,8 +464,8 @@
     100% { opacity: 0; transform: translateY(-140px) scale(1.15); }
   }
 
-  /* skip-ahead (parent, hold) — sits above safe area */
-  .skip-btn {
+  /* match-controls trigger (parent, PIN-gated) — sits above safe area */
+  .mc-btn {
     position: absolute;
     bottom: max(14px, env(safe-area-inset-bottom));
     inset-inline-end: 14px;
@@ -471,11 +475,85 @@
     background: rgba(22,34,60,0.7);
     border: 1px solid rgba(255,255,255,0.1);
     color: var(--text-dim);
-    font-size: 20px;
+    font-size: 22px;
     opacity: 0.55;
   }
-  .skip-btn .gate-ring { inset: -4px; }
-  body[data-state="fulltime"] .skip-btn, body[data-state="handoff"] .skip-btn { display: none; }
+  body[data-state="fulltime"] .mc-btn, body[data-state="handoff"] .mc-btn { display: none; }
+
+  /* injury-stoppage (pause) banner */
+  .pause-banner {
+    display: none;
+    margin-top: 16px;
+    align-items: center;
+    gap: 10px;
+    background: rgba(22, 34, 60, 0.92);
+    border: 1px solid rgba(127,216,164,0.45);
+    border-radius: 14px;
+    padding: 12px 18px;
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--good);
+  }
+  body[data-paused] .pause-banner { display: flex; }
+  body[data-paused] .sb-clock { opacity: 0.78; transition: opacity 1s ease; }
+
+  /* modals (PIN keypad + match controls) */
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 8, 16, 0.74);
+    padding: 20px;
+  }
+  .modal.open { display: flex; }
+  .modal-card {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 22px;
+    width: min(100%, 360px);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+  }
+  .modal-title { font-size: 19px; font-weight: 700; text-align: center; }
+  .modal-sub { font-size: 14px; color: var(--text-dim); text-align: center; margin-top: 6px; min-height: 18px; }
+
+  .pin-dots { display: flex; justify-content: center; gap: 14px; margin: 18px 0; }
+  .pin-dots span { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--text-dim); }
+  .pin-dots span.filled { background: var(--accent); border-color: var(--accent); }
+  .pin-dots.shake { animation: pinshake 0.4s ease; }
+  @keyframes pinshake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-8px); }
+    50% { transform: translateX(8px); }
+    75% { transform: translateX(-5px); }
+  }
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; direction: ltr; }
+  .keypad button {
+    min-height: 58px;
+    font-size: 24px;
+    font-weight: 700;
+    background: var(--bg-deep);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 14px;
+    color: var(--text);
+    touch-action: manipulation;
+  }
+  .keypad button:active { background: var(--bg-card-2); }
+
+  .mc-remaining { text-align: center; font-size: 15px; color: var(--text-dim); margin-top: 4px; }
+  .mc-remaining b { color: var(--text); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+  .modal-card .settings-btn { margin-top: 12px; }
+  .modal-card .back-link { width: 100%; margin-top: 10px; }
+  .settings-btn.primary {
+    background: linear-gradient(180deg, #f0d290, #cfa254);
+    color: #2a2008;
+    border: none;
+    font-weight: 700;
+  }
+  .settings-btn.pausebtn { background: #1d3a2f; border-color: rgba(127,216,164,0.4); color: #bfe9d0; }
 
   /* ============ SETTINGS ============ */
   #screen-settings { align-items: stretch; max-width: 520px; margin: 0 auto; }
@@ -617,6 +695,15 @@
         <div class="banner-inner" id="banner"></div>
       </div>
 
+      <div class="pause-banner" id="pause-banner" aria-live="polite">
+        <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+          <circle cx="13" cy="13" r="12" fill="#1d7c50"/>
+          <rect x="11" y="6" width="4" height="14" rx="1.5" fill="#fff"/>
+          <rect x="6" y="11" width="14" height="4" rx="1.5" fill="#fff"/>
+        </svg>
+        <span id="pause-banner-text"></span>
+      </div>
+
       <div class="stoppage-board">
         <div class="board-plate">
           <div class="board-plus">+1</div>
@@ -652,16 +739,47 @@
       </div>
     </div>
 
-    <button class="skip-btn" id="btn-skip" aria-label="Parent: hold to skip to stoppage time">
-      <span aria-hidden="true">»</span>
-      <span class="gate-ring"></span>
+    <button class="mc-btn" id="btn-mc" aria-label="Parent: match controls (PIN)">
+      <span aria-hidden="true">⚙</span>
     </button>
     <div class="celebrate" id="celebrate"></div>
   </section>
 
+  <!-- ============ PIN KEYPAD MODAL ============ -->
+  <div class="modal" id="pin-modal">
+    <div class="modal-card" dir="ltr">
+      <div class="modal-title" id="pin-title">Enter PIN</div>
+      <div class="modal-sub" id="pin-sub"></div>
+      <div class="pin-dots" id="pin-dots"><span></span><span></span><span></span><span></span></div>
+      <div class="keypad" id="pin-keypad">
+        <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+        <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+        <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+        <button data-k="back" aria-label="Delete digit">⌫</button><button data-k="0">0</button><button data-k="cancel" aria-label="Cancel">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MATCH CONTROLS MODAL (pause / end only) ============ -->
+  <div class="modal" id="mc-modal">
+    <div class="modal-card" dir="ltr">
+      <div class="modal-title">Match Controls</div>
+      <div class="mc-remaining">Time left: <b id="mc-remaining">--:--</b></div>
+      <button class="settings-btn pausebtn" id="mc-pause">Pause match</button>
+      <button class="settings-btn danger" id="mc-end">End match now</button>
+      <button class="back-link" id="mc-close">Close</button>
+    </div>
+  </div>
+
   <!-- ============ SETTINGS ============ -->
   <section class="screen" id="screen-settings" dir="ltr">
     <h2 class="settings-title">Parent Settings</h2>
+
+    <div class="setting-group">
+      <h3>Try it first</h3>
+      <button class="settings-btn primary" id="btn-test-match">▶ Run 2-minute test match</button>
+      <div class="note">Plays the whole ritual in 2 minutes: warnings at 60s and 30s, stoppage board for the last 10s. Run this once before the first real match.</div>
+    </div>
 
     <div class="setting-group">
       <h3>Language / שפה</h3>
@@ -704,9 +822,9 @@
     </div>
 
     <div class="setting-group">
-      <h3>Test mode</h3>
-      <button class="settings-btn" id="btn-test-match">Start 2-minute test match ▸</button>
-      <div class="note">Plays the whole ritual in 2 minutes: warnings at 60s and 30s, stoppage board for the last 10s.</div>
+      <h3>Match controls PIN</h3>
+      <button class="settings-btn" id="btn-change-pin">Set a 4-digit PIN</button>
+      <div class="note">The PIN unlocks pause and end-match during a match (the small ⚙ on the match screen). Forgot it? Change it here anytime.</div>
     </div>
 
     <div class="setting-group">
@@ -754,7 +872,7 @@ const STR = {
     smoothStop: "Smooth stop ✓",
     quietHome: "Back to home",
     gateHint: "Hold 3 seconds for settings",
-    skipHint: "Hold 3 seconds to skip ahead",
+    injuryStoppage: "Injury stoppage",
     pointBanner: "+1 team point! ⭐",
   },
   he: {
@@ -779,7 +897,7 @@ const STR = {
     smoothStop: "עצירה חלקה ✓",
     quietHome: "חזרה למסך הבית",
     gateHint: "להחזיק 3 שניות להגדרות",
-    skipHint: "להחזיק 3 שניות לדלג קדימה",
+    injuryStoppage: "עצירת פציעה",
     pointBanner: "נקודה לקבוצה! ⭐",
   },
 };
@@ -914,6 +1032,7 @@ const AudioEngine = {
     if (this.crowd) { this.crowdLevel(level); return; }
     const ctx = this.ctx;
     const rnd = (a, b) => a + Math.random() * (b - a);
+    this.duckFactor = 1;
     const c = this.crowd = {
       walkers: [], voices: [], csources: [],
       fastDepth: 0.12, swellMin: 10, swellMax: 25,
@@ -1026,7 +1145,14 @@ const AudioEngine = {
   crowdLevel(level, ramp = 2) {
     if (!this.crowd) return;
     this.crowdBase = level;
-    this.crowd.out.gain.setTargetAtTime(level, this.now(), ramp / 3);
+    this.crowd.out.gain.setTargetAtTime(level * this.duckFactor, this.now(), ramp / 3);
+  },
+  /* Pause duck: the stadium settles down ~4 dB while the physio is on. */
+  duckFactor: 1,
+  crowdDuck(on, ramp = 1.5) {
+    this.duckFactor = on ? 0.63 : 1;
+    if (this.crowd)
+      this.crowd.out.gain.setTargetAtTime(this.crowdBase * this.duckFactor, this.now(), ramp / 3);
   },
   /* Stoppage anticipation: deeper fast flutter + more frequent swells —
      the crowd gets busier, not louder. */
@@ -1120,8 +1246,15 @@ const STOPPAGE_NORMAL = 60, STOPPAGE_TEST = 10;
 function matchIsRunning() {
   return !!match && ["live", "stoppage"].includes(App.state);
 }
-function elapsedSec() { return (Date.now() - match.kickoff) / 1000; }
+/* While paused, the clock is frozen at the moment the pause began; the
+   accumulated pause time is added back into the kickoff-timestamp math.
+   The match's total length (durationSec) is immutable after kickoff. */
+function elapsedSec() {
+  const now = match.pausedAt || Date.now();
+  return (now - match.kickoff - (match.pausedTotal || 0)) / 1000;
+}
 function remainingSec() { return match.durationSec - elapsedSec(); }
+function isPaused() { return !!(match && match.pausedAt); }
 
 function createMatch({ minutes, test = false }) {
   const durationSec = test ? 120 : minutes * 60;
@@ -1133,6 +1266,9 @@ function createMatch({ minutes, test = false }) {
     durationSec, stoppageSec,
     w1s, w2s,
     test,
+    pausedAt: null,
+    pausedTotal: 0,
+    endedAt: null,          // set only by "End match now": the clock value to freeze at
     // warnings that don't fit inside this match length are marked fired up front
     fired: {
       w1: w1s >= durationSec,
@@ -1173,6 +1309,7 @@ function tick() {
   if (passed.length) { saveMatch(); fireEvent(passed[passed.length - 1]); }
 
   if (App.state === "stoppage") renderStoppageCount(rem);
+  if (match && $("#mc-modal").classList.contains("open")) renderMCPanel();
 }
 
 function fireEvent(ev) {
@@ -1191,6 +1328,51 @@ function fireEvent(ev) {
   } else if (ev === "fulltime") {
     enterFullTime();
   }
+}
+
+/* ---------------- match controls (parent, PIN-gated) ----------------
+   Exactly two controls exist: pause/resume and end-match-now. There is no
+   mechanism anywhere — UI, settings, or test hooks — that can increase or
+   decrease a running match's total length. */
+function applyPauseUI(on) {
+  if (on) {
+    document.body.dataset.paused = "1";
+    $("#pause-banner-text").textContent = T().injuryStoppage;
+  } else {
+    delete document.body.dataset.paused;
+  }
+}
+
+function pauseMatch() {
+  if (!match || match.pausedAt || !matchIsRunning()) return;
+  match.pausedAt = Date.now();
+  saveMatch();
+  applyPauseUI(true);
+  AudioEngine.crowdDuck(true);
+  tick();
+}
+
+function resumeMatch() {
+  if (!match || !match.pausedAt) return;
+  match.pausedTotal = (match.pausedTotal || 0) + (Date.now() - match.pausedAt);
+  match.pausedAt = null;
+  saveMatch();
+  applyPauseUI(false);
+  AudioEngine.crowdDuck(false);
+  tick();
+}
+
+function endMatchNow() {
+  if (!match || !matchIsRunning()) return;
+  if (match.pausedAt) {
+    match.pausedTotal += Date.now() - match.pausedAt;
+    match.pausedAt = null;
+  }
+  // durationSec stays untouched; the scoreboard freezes where the clock is
+  match.endedAt = Math.floor(elapsedSec());
+  match.fired.w1 = match.fired.w2 = match.fired.stoppage = match.fired.fulltime = true;
+  saveMatch();
+  enterFullTime();          // the normal ritual: whistle, applause, coach, handoff
 }
 
 function enterStoppage() {
@@ -1212,9 +1394,13 @@ function renderStoppageCount(rem) {
 let fulltimeTimer = null;
 function enterFullTime({ silent = false } = {}) {
   stopTicking();
+  applyPauseUI(false);
+  AudioEngine.crowdDuck(false);
+  closeModal("#mc-modal");
+  closeModal("#pin-modal");
   App.set("fulltime", { force: true });
   const t = T();
-  $("#sb-clock").textContent = fmtClock(match.durationSec);
+  $("#sb-clock").textContent = fmtClock(match.endedAt ?? match.durationSec);
   $("#sb-status").textContent = t.fulltimeStatus;
   $("#coach-praise").textContent = t.coachPraise;
   $("#coach-continuity").textContent = t.coachContinuity;
@@ -1255,6 +1441,7 @@ function finishMatch(delayMs) {
 }
 
 function resetMatchUI() {
+  applyPauseUI(false);
   $("#coach-card").classList.remove("show");
   $("#banner").classList.remove("show");
   $("#scoreboard").classList.remove("highlight");
@@ -1327,7 +1514,8 @@ function restore() {
   const t = T();
   $("#stoppage-caption").textContent = t.stoppageCaption;
 
-  if (rem <= 0) {
+  if (match.fired.fulltime || rem <= 0) {
+    // finished normally, or ended early via match controls
     match.fired.fulltime = true;
     saveMatch();
     enterFullTime({ silent: true });
@@ -1336,6 +1524,7 @@ function restore() {
     App.set("stoppage", { force: true });
     $("#sb-status").textContent = t.stoppageStatus;
     renderStoppageCount(rem);
+    if (match.pausedAt) applyPauseUI(true);   // a paused match restores as paused
     WakeLock.acquire();
     startTicking();
     resumeAudioOnGesture("stoppage");
@@ -1343,6 +1532,7 @@ function restore() {
     saveMatch();
     App.set("live", { force: true });
     $("#sb-status").textContent = t.firstHalf;
+    if (match.pausedAt) applyPauseUI(true);   // a paused match restores as paused
     WakeLock.acquire();
     startTicking();
     resumeAudioOnGesture("live");
@@ -1357,9 +1547,87 @@ function resumeAudioOnGesture(phase) {
     if (matchIsRunning()) {
       AudioEngine.crowdStart(0.09);
       if (App.state === "stoppage") AudioEngine.crowdAnticipation(Math.max(remainingSec(), 5));
+      if (isPaused()) AudioEngine.crowdDuck(true, 0.1);
     }
   };
   document.addEventListener("pointerdown", handler, { once: true });
+}
+
+/* ---------------- PIN keypad + match-controls panel ---------------- */
+function closeModal(sel) { $(sel).classList.remove("open"); }
+
+const PinPad = {
+  buf: "",
+  onDone: null,
+  open({ title, sub = "", onDone }) {
+    this.buf = "";
+    this.onDone = onDone;
+    $("#pin-title").textContent = title;
+    $("#pin-sub").textContent = sub;
+    this.render();
+    $("#pin-modal").classList.add("open");
+  },
+  close() { closeModal("#pin-modal"); this.onDone = null; },
+  render() {
+    document.querySelectorAll("#pin-dots span").forEach((d, i) =>
+      d.classList.toggle("filled", i < this.buf.length));
+  },
+  reject() {                                  // wrong PIN: gentle shake, clear, no lockout
+    const dots = $("#pin-dots");
+    dots.classList.remove("shake");
+    void dots.offsetWidth;                    // restart the animation
+    dots.classList.add("shake");
+    this.buf = "";
+    setTimeout(() => this.render(), 150);
+  },
+  key(k) {
+    if (k === "cancel") { this.close(); return; }
+    if (k === "back") { this.buf = this.buf.slice(0, -1); this.render(); return; }
+    if (this.buf.length >= 4) return;
+    this.buf += k;
+    this.render();
+    if (this.buf.length === 4 && this.onDone)
+      setTimeout(() => this.onDone && this.onDone(this.buf), 140);
+  },
+};
+
+function setPinFlow(after) {
+  PinPad.open({
+    title: settings.pin ? "Choose a new PIN" : "Set a 4-digit PIN",
+    sub: "It unlocks match controls during a match",
+    onDone(pin) {
+      settings.pin = pin;
+      saveSettings();
+      renderPinButton();
+      PinPad.close();
+      if (after) after();
+    },
+  });
+}
+
+function requestPin(onOk) {
+  if (!settings.pin) { setPinFlow(onOk); return; }
+  PinPad.open({
+    title: "Enter PIN",
+    onDone(pin) {
+      if (pin === settings.pin) { PinPad.close(); onOk(); }
+      else PinPad.reject();
+    },
+  });
+}
+
+function renderPinButton() {
+  $("#btn-change-pin").textContent = settings.pin ? "Change PIN" : "Set a 4-digit PIN";
+}
+
+function openMCPanel() {
+  renderMCPanel();
+  $("#mc-modal").classList.add("open");
+}
+function renderMCPanel() {
+  if (!match) return;
+  $("#mc-remaining").textContent = fmtClock(Math.max(0, remainingSec()));
+  $("#mc-pause").textContent = isPaused() ? "▶ Resume match" : "⏸ Pause match (injury stoppage)";
 }
 
 /* ---------------- hold-to-activate gate (3s) ---------------- */
@@ -1372,9 +1640,8 @@ function holdGate(btn, onComplete, hintEl, hintText) {
     btn.classList.remove("holding");
     ring.style.setProperty("--p", 0);
   };
-  btn.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    cancel();
+  const begin = () => {
+    if (timer) return;                       // pointer + touch can both fire; hold once
     start = Date.now();
     btn.classList.add("holding");
     if (hintEl) { hintEl.textContent = hintText(); }
@@ -1383,8 +1650,12 @@ function holdGate(btn, onComplete, hintEl, hintText) {
       ring.style.setProperty("--p", p);
       if (p >= 1) { cancel(); onComplete(); }
     }, 50);
-  });
-  ["pointerup", "pointercancel", "pointerleave"].forEach((ev) =>
+  };
+  btn.addEventListener("pointerdown", (e) => { e.preventDefault(); begin(); });
+  // iOS Safari: bind touch events directly too, and preventDefault so a long
+  // press can't start text selection / callout, which fires pointercancel
+  btn.addEventListener("touchstart", (e) => { e.preventDefault(); begin(); }, { passive: false });
+  ["pointerup", "pointercancel", "pointerleave", "touchend", "touchcancel"].forEach((ev) =>
     btn.addEventListener(ev, cancel));
 }
 
@@ -1408,6 +1679,7 @@ function applyLanguage() {
   $("#stoppage-caption").textContent = t.stoppageCaption;
   $("#btn-smooth-stop").textContent = t.smoothStop;
   $("#btn-quiet-home").textContent = t.quietHome;
+  if (document.body.dataset.paused) $("#pause-banner-text").textContent = t.injuryStoppage;
   document.querySelectorAll("#lang-seg button").forEach((b) =>
     b.classList.toggle("selected", b.dataset.lang === settings.lang));
 }
@@ -1438,20 +1710,38 @@ function bind() {
   $("#btn-smooth-stop").addEventListener("click", completeHandoff);
   $("#btn-quiet-home").addEventListener("click", quietFinish);
 
-  // parent settings gate (hold 3s)
-  holdGate($("#btn-gate"), () => App.set("settings"), $("#gate-hint"), () => T().gateHint);
+  // parent settings gate (hold 3s); first open prompts for a PIN
+  holdGate($("#btn-gate"), () => {
+    App.set("settings");
+    if (!settings.pin) setPinFlow();
+  }, $("#gate-hint"), () => T().gateHint);
 
-  // parent skip-ahead on the match screen (hold 3s) — jumps forward to the
-  // start of stoppage time. It can only shorten a match, never extend it.
-  holdGate($("#btn-skip"), () => {
+  // match controls: discreet ⚙ on the match screen, PIN-gated
+  $("#btn-mc").addEventListener("click", () => {
     if (!matchIsRunning()) return;
-    const rem = remainingSec();
-    if (rem > match.stoppageSec) {
-      match.kickoff -= (rem - match.stoppageSec) * 1000;
-      saveMatch();
-      tick();
-    }
-  }, null, () => "");
+    requestPin(openMCPanel);
+  });
+  document.querySelectorAll("#pin-keypad button").forEach((b) =>
+    b.addEventListener("click", () => PinPad.key(b.dataset.k)));
+  $("#pin-modal").addEventListener("click", (e) => {
+    if (e.target === $("#pin-modal")) PinPad.close();
+  });
+
+  $("#mc-pause").addEventListener("click", () => {
+    isPaused() ? resumeMatch() : pauseMatch();
+    closeModal("#mc-modal");
+  });
+  $("#mc-end").addEventListener("click", () => {
+    closeModal("#mc-modal");
+    endMatchNow();
+  });
+  $("#mc-close").addEventListener("click", () => closeModal("#mc-modal"));
+  $("#mc-modal").addEventListener("click", (e) => {
+    if (e.target === $("#mc-modal")) closeModal("#mc-modal");
+  });
+
+  $("#btn-change-pin").addEventListener("click", () => setPinFlow());
+  renderPinButton();
 
   // settings
   document.querySelectorAll("#lang-seg button").forEach((b) =>
