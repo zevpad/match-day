@@ -835,7 +835,7 @@ const App = {
 /* ---------------- audio engine (all sounds synthesized) ---------------- */
 const AudioEngine = {
   ctx: null, master: null,
-  crowdGain: null, crowdFilter: null, crowdBase: 0,
+  crowd: null, crowdBase: 0,
 
   init() {
     if (this.ctx) { if (this.ctx.state === "suspended") this.ctx.resume(); return; }
@@ -898,41 +898,155 @@ const AudioEngine = {
     this.whistle({ at: 1.0,  dur: 1.1, freq: 2050, vol: 0.36 });
   },
 
-  /* Looped filtered noise with slow drift = crowd ambience. */
+  /* Stadium crowd ambience, four layers:
+       1. base roar — bandpassed noise (≈500–2000 Hz) through vocal formant
+          peaks at 800/1400/2600 Hz, so the energy sits in the human-voice band
+       2. "many voices" flutter — the roar's gain is the sum of three random
+          walks (slow tide ~0.1 Hz, medium ~1–2 Hz, fast irregular ~5–10 Hz);
+          the fast shallow flutter is what reads as thousands of people
+       3. voice shimmer — 12 quiet detuned triangles (180–420 Hz) with slow
+          independent pitch drift and AM, mixed ~20 dB under the roar
+       4. events — a gentle swell every 10–25 s, sometimes with a soft
+          distant-cheer burst (2–4 kHz noise)
+     All movement is ramped; nothing steps abruptly. */
   crowdStart(level = 0.1) {
-    if (!this.ready || this.crowdGain) { this.crowdLevel(level); return; }
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.noiseBuffer(3);
-    src.loop = true;
-    this.crowdFilter = this.ctx.createBiquadFilter();
-    this.crowdFilter.type = "lowpass";
-    this.crowdFilter.frequency.value = 850;
-    this.crowdGain = this.ctx.createGain();
-    this.crowdGain.gain.value = 0.0001;
-    src.connect(this.crowdFilter).connect(this.crowdGain).connect(this.master);
-    // slow amplitude drift so the crowd feels alive
-    const lfo = this.ctx.createOscillator();
-    lfo.frequency.value = 0.07;
-    const lfoDepth = this.ctx.createGain();
-    lfoDepth.gain.value = 0.02;
-    lfo.connect(lfoDepth).connect(this.crowdGain.gain);
-    src.start(); lfo.start();
+    if (!this.ready) return;
+    if (this.crowd) { this.crowdLevel(level); return; }
+    const ctx = this.ctx;
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const c = this.crowd = {
+      walkers: [], voices: [], csources: [],
+      fastDepth: 0.12, swellMin: 10, swellMax: 25,
+    };
+    const walker = (fn, minMs, maxMs) => {
+      const w = { id: null, alive: true };
+      const loop = () => {
+        if (!w.alive || this.crowd !== c) return;
+        fn();
+        w.id = setTimeout(loop, rnd(minMs, maxMs));
+      };
+      w.id = setTimeout(loop, rnd(0, minMs));   // randomize phase on each start
+      c.walkers.push(w);
+    };
+
+    c.out = ctx.createGain();
+    c.out.gain.value = 0.0001;
+    c.out.connect(this.master);
+
+    // 1) base roar
+    c.src = ctx.createBufferSource();
+    c.src.buffer = this.noiseBuffer(3);
+    c.src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1000;                  // passband ≈ 500–2000 Hz
+    bp.Q.value = 0.67;
+    let head = c.src; head.connect(bp); head = bp;
+    [[800, 5], [1400, 5], [2600, 4]].forEach(([f, g]) => {
+      const p = ctx.createBiquadFilter();
+      p.type = "peaking"; p.frequency.value = f; p.gain.value = g; p.Q.value = 2;
+      head.connect(p); head = p;
+    });
+    c.roar = ctx.createGain();
+    c.roar.gain.value = 1.0;                    // flutter walks around 1.0
+    c.swell = ctx.createGain();
+    c.swell.gain.value = 1.0;
+    c.makeup = ctx.createGain();
+    c.makeup.gain.value = 0.54;                 // match the loudness of the original lowpass crowd
+    head.connect(c.roar).connect(c.swell).connect(c.makeup).connect(c.out);
+    c.src.start();
+
+    // 2) flutter: three random walks summed into the roar gain
+    const flutter = (depthFn, tc, minMs, maxMs) => {
+      const cs = ctx.createConstantSource();
+      cs.offset.value = 0;
+      cs.connect(c.roar.gain);
+      cs.start();
+      c.csources.push(cs);
+      walker(() => {
+        const d = depthFn();
+        cs.offset.setTargetAtTime(rnd(-d, d), ctx.currentTime, tc);
+      }, minMs, maxMs);
+    };
+    flutter(() => 0.18, 2.5, 4000, 9000);         // slow tide of the crowd (~0.1 Hz)
+    flutter(() => 0.15, 0.3, 350, 750);           // medium (~1–2 Hz)
+    flutter(() => c.fastDepth, 0.05, 90, 190);    // fast, irregular, shallow (~5–10 Hz)
+
+    // 3) voice shimmer
+    c.shimmerBus = ctx.createGain();
+    c.shimmerBus.gain.value = 0.10;               // ≈ -20 dB under the roar
+    c.shimmerBus.connect(c.swell);
+    for (let i = 0; i < 12; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      const f0 = rnd(180, 420);
+      osc.frequency.value = f0;
+      const vg = ctx.createGain();
+      const amp = rnd(0.03, 0.07);
+      vg.gain.value = amp * rnd(0.3, 1);
+      osc.connect(vg).connect(c.shimmerBus);
+      osc.start();
+      c.voices.push(osc);
+      walker(() => {
+        const t = ctx.currentTime;
+        osc.frequency.setTargetAtTime(f0 * Math.pow(2, rnd(-20, 20) / 1200), t, 1.5);
+        vg.gain.setTargetAtTime(amp * rnd(0.25, 1), t, 1.2);
+      }, 1800, 4500);
+    }
+
+    // 4) events: gentle swells, occasionally with a distant-cheer burst
+    const swellOnce = () => {
+      const t = ctx.currentTime;
+      c.swell.gain.cancelScheduledValues(t);
+      c.swell.gain.setValueAtTime(c.swell.gain.value, t);
+      c.swell.gain.linearRampToValueAtTime(1.41, t + 2);      // ≈ +3 dB over 2 s
+      c.swell.gain.setTargetAtTime(1.0, t + 2, 1.0);          // decay ≈ 3 s
+      if (Math.random() < 1 / 3) {
+        const b = ctx.createBufferSource();
+        b.buffer = this.noiseBuffer(1);
+        const cf = ctx.createBiquadFilter();
+        cf.type = "bandpass"; cf.frequency.value = 2800; cf.Q.value = 1.1;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.05, t + 0.2);        // soft attack
+        g.gain.setTargetAtTime(0.0001, t + 0.3, 0.15);
+        b.connect(cf).connect(g).connect(c.out);
+        b.start(t); b.stop(t + 0.9);
+      }
+    };
+    const nextSwell = () => {
+      if (this.crowd !== c) return;
+      c.swellId = setTimeout(() => { swellOnce(); nextSwell(); },
+                             rnd(c.swellMin, c.swellMax) * 1000);
+    };
+    nextSwell();
+
     this.crowdLevel(level, 2.5);
   },
   crowdLevel(level, ramp = 2) {
-    if (!this.crowdGain) return;
+    if (!this.crowd) return;
     this.crowdBase = level;
-    this.crowdGain.gain.setTargetAtTime(level, this.now(), ramp / 3);
+    this.crowd.out.gain.setTargetAtTime(level, this.now(), ramp / 3);
   },
-  /* Stoppage anticipation: gentle filter sweep + volume ramp over the countdown. */
-  crowdAnticipation(seconds) {
-    if (!this.crowdGain) return;
-    const t = this.now();
-    this.crowdFilter.frequency.setTargetAtTime(1600, t, seconds / 3);
-    this.crowdGain.gain.setTargetAtTime(Math.min(this.crowdBase + 0.07, 0.25), t, seconds / 3);
+  /* Stoppage anticipation: deeper fast flutter + more frequent swells —
+     the crowd gets busier, not louder. */
+  crowdAnticipation() {
+    if (!this.crowd) return;
+    this.crowd.fastDepth = 0.2;
+    this.crowd.swellMin = 5;
+    this.crowd.swellMax = 11;
   },
   crowdStop(ramp = 3) {
-    if (this.crowdGain) this.crowdGain.gain.setTargetAtTime(0.0001, this.now(), ramp / 3);
+    const c = this.crowd;
+    if (!c) return;
+    this.crowd = null;                          // walkers/swell see this and stop rescheduling
+    c.out.gain.setTargetAtTime(0.0001, this.now(), ramp / 3);
+    setTimeout(() => {
+      c.walkers.forEach((w) => { w.alive = false; clearTimeout(w.id); });
+      clearTimeout(c.swellId);
+      [c.src, ...c.voices, ...c.csources].forEach((n) => { try { n.stop(); } catch {} });
+      c.out.disconnect();
+    }, ramp * 1000 + 1500);
   },
 
   /* Applause: burst-modulated noise, swells in and fades out. */
