@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Match Day</title>
+<style>
+  :root {
+    --bg-deep: #0a1020;
+    --bg-mid: #101a30;
+    --bg-card: #16223c;
+    --bg-card-2: #1b2a47;
+    --pitch: #1d3a2f;
+    --pitch-line: #2c5546;
+    --text: #f2f4f8;
+    --text-dim: #a7b2c8;
+    --accent: #e8c47a;
+    --accent-soft: #caa85f;
+    --good: #7fd8a4;
+    --board: #0d1526;
+    --ring: rgba(232, 196, 122, 0.9);
+    --radius: 18px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-deep);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  body {
+    background: radial-gradient(120% 90% at 50% -10%, #182848 0%, var(--bg-mid) 45%, var(--bg-deep) 100%);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .screen.active { display: flex; }
+
+  button {
+    font: inherit;
+    color: inherit;
+    border: none;
+    background: none;
+    cursor: pointer;
+    min-height: 44px;
+    min-width: 44px;
+  }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 12px; }
+
+  /* ============ HOME ============ */
+  .home-top { width: 100%; display: flex; justify-content: flex-end; }
+  .brand {
+    margin-top: 4vh;
+    text-align: center;
+  }
+  .brand h1 {
+    font-size: clamp(38px, 10vw, 56px);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    background: linear-gradient(180deg, #fdf3da, var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .brand .sub { color: var(--text-dim); margin-top: 6px; font-size: 18px; }
+
+  .points-card {
+    margin-top: 5vh;
+    background: var(--bg-card);
+    border: 1px solid rgba(232,196,122,0.25);
+    border-radius: var(--radius);
+    padding: 22px 34px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  .points-card .label { color: var(--text-dim); font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .points-card .value {
+    font-size: 54px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+  .points-card .stars { font-size: 22px; margin-top: 2px; }
+
+  .big-btn {
+    display: block;
+    width: min(100%, 380px);
+    padding: 20px 24px;
+    border-radius: 20px;
+    font-size: 24px;
+    font-weight: 700;
+    text-align: center;
+    background: linear-gradient(180deg, #2a9d68, #1d7c50);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(29,124,80,0.4);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .big-btn:active { transform: scale(0.98); }
+  .big-btn.gold {
+    background: linear-gradient(180deg, #f0d290, #cfa254);
+    color: #2a2008;
+    box-shadow: 0 8px 24px rgba(207,162,84,0.4);
+  }
+  #home-start { margin-top: 6vh; }
+
+  /* Settings gate button */
+  .gate-btn {
+    position: relative;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.12);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+    color: var(--text-dim);
+  }
+  .gate-ring {
+    position: absolute; inset: -4px;
+    border-radius: 50%;
+    background: conic-gradient(var(--ring) calc(var(--p, 0) * 1turn), transparent 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .gate-btn.holding .gate-ring { opacity: 1; }
+  .gate-hint {
+    position: absolute;
+    top: 64px; right: 0;
+    font-size: 13px;
+    color: var(--text-dim);
+    background: var(--bg-card);
+    padding: 6px 10px;
+    border-radius: 10px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.25s;
+    pointer-events: none;
+  }
+  .gate-btn.holding + .gate-hint, .gate-hint.show { opacity: 1; }
+  [dir="rtl"] .gate-hint { right: auto; left: 0; }
+
+  /* ============ SETUP ============ */
+  .setup-title { margin-top: 6vh; font-size: 30px; font-weight: 700; text-align: center; }
+  .preset-row {
+    margin-top: 4vh;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    width: min(100%, 400px);
+  }
+  .preset {
+    padding: 20px 8px;
+    border-radius: 16px;
+    background: var(--bg-card);
+    border: 2px solid rgba(255,255,255,0.1);
+    text-align: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .preset small { display: block; font-size: 14px; font-weight: 500; color: var(--text-dim); margin-top: 4px; }
+  .preset.selected { border-color: var(--accent); background: var(--bg-card-2); }
+  .custom-row {
+    margin-top: 16px;
+    width: min(100%, 400px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 10px 16px;
+    transition: border-color 0.2s;
+  }
+  .custom-row.selected { border-color: var(--accent); }
+  .custom-row label { color: var(--text-dim); flex: 1; font-size: 17px; }
+  .custom-row input {
+    width: 90px;
+    font: inherit;
+    font-size: 24px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--text);
+    background: var(--bg-deep);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    padding: 8px;
+    direction: ltr;
+  }
+  #btn-kickoff { margin-top: 5vh; }
+  .back-link { margin-top: 24px; color: var(--text-dim); font-size: 17px; padding: 10px 20px; }
+
+  /* ============ MATCH ============ */
+  #screen-match { justify-content: flex-start; overflow: hidden; }
+  .stadium {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .sky-glow {
+    position: absolute;
+    top: -20%; left: 50%;
+    width: 140%; height: 60%;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse at center, rgba(90,120,200,0.18), transparent 65%);
+  }
+  .star { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,0.5); animation: twinkle 4s ease-in-out infinite; }
+  @keyframes twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.7; } }
+  .floodlight {
+    position: absolute;
+    bottom: 28%;
+    width: 4px; height: 90px;
+    background: linear-gradient(180deg, #3a4a6a, #202c48);
+  }
+  .floodlight::before {
+    content: "";
+    position: absolute;
+    top: -14px; left: -14px;
+    width: 32px; height: 12px;
+    border-radius: 4px;
+    background: #d7e2f5;
+    box-shadow: 0 0 24px 6px rgba(215,226,245,0.35);
+  }
+  .pitch {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 32%;
+    background: linear-gradient(180deg, #234636 0%, var(--pitch) 40%, #152a21 100%);
+    border-top: 2px solid var(--pitch-line);
+  }
+  .pitch::before {
+    content: "";
+    position: absolute;
+    top: 12%; left: 50%;
+    transform: translateX(-50%);
+    width: 34%; height: 52%;
+    border: 2px solid rgba(120,180,150,0.35);
+    border-radius: 50%;
+  }
+  .pitch::after {
+    content: "";
+    position: absolute;
+    top: 0; left: 50%;
+    width: 2px; height: 100%;
+    background: rgba(120,180,150,0.35);
+  }
+
+  .match-content {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 460px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+  }
+
+  .scoreboard {
+    margin-top: 3vh;
+    background: var(--board);
+    border: 2px solid rgba(232,196,122,0.35);
+    border-radius: 16px;
+    padding: 14px 26px;
+    text-align: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+    transition: box-shadow 1.2s ease, border-color 1.2s ease;
+  }
+  .scoreboard.highlight {
+    border-color: var(--accent);
+    box-shadow: 0 0 34px rgba(232,196,122,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .scoreboard .sb-label {
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .sb-clock {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-size: clamp(56px, 17vw, 84px);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    color: #fdf6e4;
+    text-shadow: 0 0 18px rgba(232,196,122,0.25);
+  }
+  .sb-half { font-size: 15px; color: var(--accent-soft); letter-spacing: 0.12em; min-height: 20px; }
+
+  .banner {
+    margin-top: 20px;
+    min-height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+  }
+  .banner-inner {
+    background: rgba(22, 34, 60, 0.92);
+    border: 1px solid rgba(232,196,122,0.4);
+    color: var(--text);
+    border-radius: 14px;
+    padding: 14px 22px;
+    font-size: 21px;
+    font-weight: 600;
+    text-align: center;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.8s ease, transform 0.8s ease;
+  }
+  .banner-inner.show { opacity: 1; transform: translateY(0); }
+
+  /* Stoppage board */
+  .stoppage-board {
+    display: none;
+    margin-top: 3vh;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  body[data-state="stoppage"] .stoppage-board { display: flex; }
+  .board-plate {
+    background: #111;
+    border: 3px solid #333;
+    border-radius: 20px;
+    padding: 18px 40px;
+    text-align: center;
+    box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+    animation: boardup 1.4s ease;
+  }
+  @keyframes boardup { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  .board-plus {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-size: clamp(72px, 24vw, 120px);
+    font-weight: 900;
+    color: #ffb84d;
+    line-height: 1;
+    text-shadow: 0 0 26px rgba(255,184,77,0.35);
+  }
+  .board-caption { font-size: 18px; color: var(--text); font-weight: 600; }
+  .stoppage-count {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .count-ring { width: 74px; height: 74px; transform: rotate(-90deg); }
+  .count-ring circle { fill: none; stroke-width: 6; }
+  .count-ring .track { stroke: rgba(255,255,255,0.12); }
+  .count-ring .prog { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 0.3s linear; }
+  .count-num {
+    direction: ltr;
+    font-size: 46px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #fdf6e4;
+    min-width: 74px;
+    text-align: center;
+  }
+
+  /* Full time / handoff */
+  .fulltime-area {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    margin-top: 2vh;
+  }
+  body[data-state="fulltime"] .fulltime-area,
+  body[data-state="handoff"] .fulltime-area { display: flex; }
+  body[data-state="fulltime"] .stoppage-board,
+  body[data-state="handoff"] .stoppage-board { display: none; }
+
+  .coach-card {
+    background: var(--bg-card);
+    border: 1px solid rgba(232,196,122,0.3);
+    border-radius: var(--radius);
+    padding: 22px;
+    width: 100%;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 1s ease, transform 1s ease;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  }
+  .coach-card.show { opacity: 1; transform: translateY(0); }
+  .coach-face { flex-shrink: 0; }
+  .coach-lines { flex: 1; }
+  .coach-praise { font-size: 19px; line-height: 1.45; }
+  .coach-continuity {
+    margin-top: 10px;
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.4;
+  }
+  #btn-smooth-stop {
+    margin-top: 26px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 1s ease;
+  }
+  body[data-state="handoff"] #btn-smooth-stop { opacity: 1; pointer-events: auto; }
+  .quiet-home {
+    margin-top: 18px;
+    color: var(--text-dim);
+    font-size: 15px;
+    padding: 12px 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 1s ease 1s;
+  }
+  body[data-state="handoff"] .quiet-home { opacity: 0.8; pointer-events: auto; }
+
+  /* celebration */
+  .celebrate {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    overflow: hidden;
+  }
+  .celebrate span {
+    position: absolute;
+    font-size: 28px;
+    opacity: 0;
+    animation: floatstar 2.6s ease-out forwards;
+  }
+  @keyframes floatstar {
+    0% { opacity: 0; transform: translateY(20px) scale(0.6); }
+    20% { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-140px) scale(1.15); }
+  }
+
+  /* skip-ahead (parent, hold) — sits above safe area */
+  .skip-btn {
+    position: absolute;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    inset-inline-end: 14px;
+    z-index: 2;
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: rgba(22,34,60,0.7);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-dim);
+    font-size: 20px;
+    opacity: 0.55;
+  }
+  .skip-btn .gate-ring { inset: -4px; }
+  body[data-state="fulltime"] .skip-btn, body[data-state="handoff"] .skip-btn { display: none; }
+
+  /* ============ SETTINGS ============ */
+  #screen-settings { align-items: stretch; max-width: 520px; margin: 0 auto; }
+  .settings-title { font-size: 26px; font-weight: 700; margin: 10px 0 18px; text-align: center; }
+  .setting-group {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .setting-group h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 12px; }
+  .seg {
+    display: flex;
+    gap: 8px;
+  }
+  .seg button {
+    flex: 1;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--bg-deep);
+    border: 2px solid rgba(255,255,255,0.1);
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .seg button.selected { border-color: var(--accent); background: var(--bg-card-2); }
+  .slider-row { display: flex; align-items: center; gap: 14px; }
+  .slider-row input[type=range] {
+    flex: 1;
+    height: 44px;
+    accent-color: var(--accent);
+  }
+  .warn-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .warn-row:last-child { margin-bottom: 0; }
+  .warn-row label { color: var(--text); font-size: 16px; flex: 1; }
+  .warn-row select {
+    font: inherit; font-size: 18px; font-weight: 600;
+    background: var(--bg-deep); color: var(--text);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-height: 44px;
+  }
+  .note { font-size: 14px; color: var(--text-dim); line-height: 1.4; margin-top: 8px; }
+  .warn-badge {
+    background: #4a3413;
+    color: #f5cf85;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    margin-top: 10px;
+    display: none;
+  }
+  .warn-badge.show { display: block; }
+  .settings-btn {
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    background: var(--bg-deep);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+  .settings-btn.danger { color: #f0a3a3; border-color: rgba(240,163,163,0.3); }
+  .settings-btn.confirm { background: #58201f; border-color: #a04543; color: #ffd9d8; }
+  #btn-settings-close { margin: 10px auto 30px; display: block; }
+
+  /* reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .star { animation: none; opacity: 0.4; }
+    .board-plate { animation: none; }
+    .banner-inner, .coach-card, #btn-smooth-stop, .quiet-home { transition-duration: 0.01s; }
+    .celebrate span { animation-duration: 0.9s; }
+    .big-btn { transition: none; }
+  }
+</style>
+</head>
+<body data-state="home">
+
+  <!-- ============ HOME ============ -->
+  <section class="screen active" id="screen-home">
+    <div class="home-top">
+      <div style="position:relative">
+        <button class="gate-btn" id="btn-gate" aria-label="Parent settings — press and hold">
+          <span aria-hidden="true">⚙</span>
+          <span class="gate-ring"></span>
+        </button>
+        <div class="gate-hint" id="gate-hint"></div>
+      </div>
+    </div>
+    <div class="brand">
+      <h1>Match Day</h1>
+      <div class="sub" id="home-sub"></div>
+    </div>
+    <div class="points-card">
+      <div class="label" id="points-label"></div>
+      <div class="value" id="points-value">0</div>
+      <div class="stars" aria-hidden="true">⭐</div>
+    </div>
+    <button class="big-btn" id="home-start"></button>
+  </section>
+
+  <!-- ============ SETUP ============ -->
+  <section class="screen" id="screen-setup">
+    <h2 class="setup-title" id="setup-title"></h2>
+    <div class="preset-row" role="group" id="preset-row">
+      <button class="preset" data-min="60">60<small id="min-label-1"></small></button>
+      <button class="preset selected" data-min="90">90<small id="min-label-2"></small></button>
+      <button class="preset" data-min="120">120<small id="min-label-3"></small></button>
+    </div>
+    <div class="custom-row" id="custom-row">
+      <label for="custom-min" id="custom-label"></label>
+      <input type="number" id="custom-min" min="5" max="240" step="5" inputmode="numeric" placeholder="45">
+    </div>
+    <button class="big-btn gold" id="btn-kickoff"></button>
+    <button class="back-link" id="btn-setup-back"></button>
+  </section>
+
+  <!-- ============ MATCH (live / stoppage / fulltime / handoff) ============ -->
+  <section class="screen" id="screen-match">
+    <div class="stadium" aria-hidden="true">
+      <div class="sky-glow"></div>
+      <div class="floodlight" style="left:12%"></div>
+      <div class="floodlight" style="right:12%"></div>
+      <div class="pitch"></div>
+    </div>
+
+    <div class="match-content">
+      <div class="scoreboard" id="scoreboard">
+        <div class="sb-label">Match Day</div>
+        <div class="sb-clock" id="sb-clock">00:00</div>
+        <div class="sb-half" id="sb-status"></div>
+      </div>
+
+      <div class="banner" aria-live="polite">
+        <div class="banner-inner" id="banner"></div>
+      </div>
+
+      <div class="stoppage-board">
+        <div class="board-plate">
+          <div class="board-plus">+1</div>
+          <div class="board-caption" id="stoppage-caption"></div>
+        </div>
+        <div class="stoppage-count" aria-hidden="false">
+          <svg class="count-ring" viewBox="0 0 80 80" aria-hidden="true">
+            <circle class="track" cx="40" cy="40" r="34"></circle>
+            <circle class="prog" id="count-prog" cx="40" cy="40" r="34"
+                    stroke-dasharray="213.6" stroke-dashoffset="0"></circle>
+          </svg>
+          <div class="count-num" id="count-num">60</div>
+        </div>
+      </div>
+
+      <div class="fulltime-area">
+        <div class="coach-card" id="coach-card">
+          <svg class="coach-face" width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
+            <circle cx="38" cy="42" r="26" fill="#e8b98a"/>
+            <path d="M12 38 a26 26 0 0 1 52 0 l-4 0 a22 22 0 0 0 -44 0 z" fill="#28406b"/>
+            <rect x="10" y="34" width="56" height="7" rx="3.5" fill="#1d3153"/>
+            <circle cx="29" cy="44" r="3" fill="#2a2018"/>
+            <circle cx="47" cy="44" r="3" fill="#2a2018"/>
+            <path d="M28 55 q10 8 20 0" stroke="#2a2018" stroke-width="3" fill="none" stroke-linecap="round"/>
+          </svg>
+          <div class="coach-lines">
+            <div class="coach-praise" id="coach-praise"></div>
+            <div class="coach-continuity" id="coach-continuity"></div>
+          </div>
+        </div>
+        <button class="big-btn gold" id="btn-smooth-stop"></button>
+        <button class="quiet-home" id="btn-quiet-home"></button>
+      </div>
+    </div>
+
+    <button class="skip-btn" id="btn-skip" aria-label="Parent: hold to skip to stoppage time">
+      <span aria-hidden="true">»</span>
+      <span class="gate-ring"></span>
+    </button>
+    <div class="celebrate" id="celebrate"></div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="screen" id="screen-settings" dir="ltr">
+    <h2 class="settings-title">Parent Settings</h2>
+
+    <div class="setting-group">
+      <h3>Language / שפה</h3>
+      <div class="seg" id="lang-seg">
+        <button data-lang="en">English</button>
+        <button data-lang="he">עברית</button>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <h3>Volume</h3>
+      <div class="slider-row">
+        <span aria-hidden="true">🔈</span>
+        <input type="range" id="volume" min="0" max="100" step="5" aria-label="Master volume">
+        <span aria-hidden="true">🔊</span>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <h3>Warnings (minutes before full time)</h3>
+      <div class="warn-row">
+        <label for="warn1">First warning</label>
+        <select id="warn1">
+          <option>15</option><option selected>10</option><option>8</option>
+        </select>
+      </div>
+      <div class="warn-row">
+        <label for="warn2">Second warning</label>
+        <select id="warn2">
+          <option selected>5</option><option>3</option><option>2</option>
+        </select>
+      </div>
+      <div class="note">The stoppage-time board (+1) always goes up 1 minute before full time. Changes apply to the next match — a running match can never be changed.</div>
+    </div>
+
+    <div class="setting-group">
+      <h3>Screen</h3>
+      <div class="note" id="wakelock-ok">The screen stays awake automatically during a match.</div>
+      <div class="warn-badge" id="wakelock-warn">This browser can't keep the screen awake automatically. Please set the phone's Auto-Lock to "Never" while watching (Settings → Display &amp; Brightness).</div>
+    </div>
+
+    <div class="setting-group">
+      <h3>Test mode</h3>
+      <button class="settings-btn" id="btn-test-match">Start 2-minute test match ▸</button>
+      <div class="note">Plays the whole ritual in 2 minutes: warnings at 60s and 30s, stoppage board for the last 10s.</div>
+    </div>
+
+    <div class="setting-group">
+      <h3>Team points</h3>
+      <button class="settings-btn danger" id="btn-reset-points">Reset points to 0</button>
+    </div>
+
+    <button class="back-link" id="btn-settings-close">Close ✕</button>
+  </section>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   Match Day — Phase 1 single-file app.
+   States: home → setup → live → stoppage → fulltime → handoff → home
+   Clock is always derived from the kickoff timestamp; there is no way
+   to add time to a running match anywhere in this file.
+   ===================================================================== */
+
+const $ = (s) => document.querySelector(s);
+const LS = { settings: "md_settings", match: "md_match", points: "md_points" };
+
+/* ---------------- strings ---------------- */
+const STR = {
+  en: {
+    homeSub: "Tonight's match is ready",
+    pointsLabel: "Team points",
+    start: "New match",
+    setupTitle: "How long is tonight's match?",
+    minutes: "min",
+    customLabel: "Custom length (minutes)",
+    kickoffBtn: "Kickoff! 🏟️",
+    back: "‹ Back",
+    firstHalf: "MATCH IN PLAY",
+    kickoffBanner: "Kickoff! The match has begun!",
+    w1Banner: (secs) => secs >= 120 ? `${Math.round(secs / 60)} minutes to full time!` : `${secs} seconds to full time!`,
+    w2Banner: (secs) => secs >= 120 ? `${Math.round(secs / 60)} minutes left! Final stretch!` : `${secs} seconds left! Final stretch!`,
+    stoppageCaption: "Stoppage time: 1 minute",
+    stoppageStatus: "STOPPAGE TIME",
+    fulltimeBanner: "Full time!",
+    fulltimeStatus: "FULL TIME",
+    coachPraise: "Well done! You finished the match brilliantly.",
+    coachContinuity: "See you at tomorrow's match!",
+    smoothStop: "Smooth stop ✓",
+    quietHome: "Back to home",
+    gateHint: "Hold 3 seconds for settings",
+    skipHint: "Hold 3 seconds to skip ahead",
+    pointBanner: "+1 team point! ⭐",
+  },
+  he: {
+    homeSub: "המשחק של הערב מוכן",
+    pointsLabel: "נקודות קבוצה",
+    start: "משחק חדש",
+    setupTitle: "כמה זמן המשחק הערב?",
+    minutes: "דק'",
+    customLabel: "אורך אחר (דקות)",
+    kickoffBtn: "שריקת פתיחה! 🏟️",
+    back: "‹ חזרה",
+    firstHalf: "המשחק מתנהל",
+    kickoffBanner: "המשחק התחיל!",
+    w1Banner: () => "עוד עשר דקות לסיום!",
+    w2Banner: () => "עוד חמש דקות! הישורת האחרונה!",
+    stoppageCaption: "תוספת זמן: דקה אחת",
+    stoppageStatus: "תוספת זמן",
+    fulltimeBanner: "שריקת סיום!",
+    fulltimeStatus: "סיום המשחק",
+    coachPraise: "כל הכבוד! סיימת את המשחק בצורה נהדרת.",
+    coachContinuity: "נתראה במשחק של מחר!",
+    smoothStop: "עצירה חלקה ✓",
+    quietHome: "חזרה למסך הבית",
+    gateHint: "להחזיק 3 שניות להגדרות",
+    skipHint: "להחזיק 3 שניות לדלג קדימה",
+    pointBanner: "נקודה לקבוצה! ⭐",
+  },
+};
+const T = () => STR[settings.lang] || STR.en;
+
+/* ---------------- storage ---------------- */
+function loadJSON(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key));
+    return v == null ? fallback : v;
+  } catch { return fallback; }
+}
+const saveJSON = (key, v) => localStorage.setItem(key, JSON.stringify(v));
+
+let settings = Object.assign({ lang: "en", volume: 70, w1: 10, w2: 5 }, loadJSON(LS.settings, {}));
+let points = loadJSON(LS.points, 0);
+let match = loadJSON(LS.match, null);
+
+const saveSettings = () => saveJSON(LS.settings, settings);
+const savePoints = () => saveJSON(LS.points, points);
+const saveMatch = () => (match ? saveJSON(LS.match, match) : localStorage.removeItem(LS.match));
+
+/* ---------------- state machine ---------------- */
+const TRANSITIONS = {
+  home:     ["setup", "settings"],
+  setup:    ["home", "live"],
+  settings: ["home", "live"],           // live: test match started from settings
+  live:     ["stoppage", "fulltime"],   // fulltime direct for very short matches
+  stoppage: ["fulltime"],
+  fulltime: ["handoff"],
+  handoff:  ["home"],
+};
+
+const App = {
+  state: "home",
+  /** opts.force: used only by reload-restore to jump straight into the live phase */
+  set(next, opts = {}) {
+    if (!opts.force && !TRANSITIONS[this.state].includes(next)) {
+      console.warn(`Blocked transition ${this.state} → ${next}`);
+      return false;
+    }
+    this.state = next;
+    document.body.dataset.state = next;
+    const screen = { home: "home", setup: "setup", settings: "settings",
+                     live: "match", stoppage: "match", fulltime: "match", handoff: "match" }[next];
+    document.querySelectorAll(".screen").forEach((el) =>
+      el.classList.toggle("active", el.id === "screen-" + screen));
+    if (next === "home") renderHome();
+    return true;
+  },
+};
+
+/* ---------------- audio engine (all sounds synthesized) ---------------- */
+const AudioEngine = {
+  ctx: null, master: null,
+  crowdGain: null, crowdFilter: null, crowdBase: 0,
+
+  init() {
+    if (this.ctx) { if (this.ctx.state === "suspended") this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = settings.volume / 100;
+    this.master.connect(this.ctx.destination);
+  },
+  get ready() { return !!this.ctx; },
+  now() { return this.ctx.currentTime; },
+  setVolume(v01) {
+    if (this.master) this.master.gain.setTargetAtTime(v01, this.now(), 0.1);
+  },
+
+  noiseBuffer(seconds = 2) {
+    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * seconds, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  },
+
+  /* Referee pea-whistle: two detuned oscillators + fast warble. */
+  whistle({ at = 0, dur = 0.5, freq = 2250, vol = 0.4 } = {}) {
+    if (!this.ready) return;
+    const t0 = this.now() + at;
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(vol, t0 + 0.03);
+    env.gain.setValueAtTime(vol, t0 + dur);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.12);
+    env.connect(this.master);
+
+    const warble = this.ctx.createOscillator();          // the "pea"
+    warble.frequency.value = 42;
+    const warbleDepth = this.ctx.createGain();
+    warbleDepth.gain.value = freq * 0.045;
+    warble.connect(warbleDepth);
+
+    [freq, freq * 1.024].forEach((f) => {
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = f;
+      warbleDepth.connect(osc.frequency);
+      const g = this.ctx.createGain();
+      g.gain.value = 0.5;
+      osc.connect(g).connect(env);
+      osc.start(t0); osc.stop(t0 + dur + 0.25);
+    });
+    warble.start(t0); warble.stop(t0 + dur + 0.25);
+  },
+  whistleKickoff()  { this.whistle({ dur: 0.9, vol: 0.4 }); },
+  whistleShort()    { this.whistle({ dur: 0.45, vol: 0.32 }); },
+  whistleDouble()   { this.whistle({ dur: 0.35, vol: 0.32 }); this.whistle({ at: 0.5, dur: 0.35, vol: 0.32 }); },
+  /* Full time: the familiar "peep, peep, peeeeep" — warm, slightly lower. */
+  whistleFullTime() {
+    this.whistle({ at: 0,    dur: 0.3, freq: 2100, vol: 0.34 });
+    this.whistle({ at: 0.5,  dur: 0.3, freq: 2100, vol: 0.34 });
+    this.whistle({ at: 1.0,  dur: 1.1, freq: 2050, vol: 0.36 });
+  },
+
+  /* Looped filtered noise with slow drift = crowd ambience. */
+  crowdStart(level = 0.1) {
+    if (!this.ready || this.crowdGain) { this.crowdLevel(level); return; }
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(3);
+    src.loop = true;
+    this.crowdFilter = this.ctx.createBiquadFilter();
+    this.crowdFilter.type = "lowpass";
+    this.crowdFilter.frequency.value = 850;
+    this.crowdGain = this.ctx.createGain();
+    this.crowdGain.gain.value = 0.0001;
+    src.connect(this.crowdFilter).connect(this.crowdGain).connect(this.master);
+    // slow amplitude drift so the crowd feels alive
+    const lfo = this.ctx.createOscillator();
+    lfo.frequency.value = 0.07;
+    const lfoDepth = this.ctx.createGain();
+    lfoDepth.gain.value = 0.02;
+    lfo.connect(lfoDepth).connect(this.crowdGain.gain);
+    src.start(); lfo.start();
+    this.crowdLevel(level, 2.5);
+  },
+  crowdLevel(level, ramp = 2) {
+    if (!this.crowdGain) return;
+    this.crowdBase = level;
+    this.crowdGain.gain.setTargetAtTime(level, this.now(), ramp / 3);
+  },
+  /* Stoppage anticipation: gentle filter sweep + volume ramp over the countdown. */
+  crowdAnticipation(seconds) {
+    if (!this.crowdGain) return;
+    const t = this.now();
+    this.crowdFilter.frequency.setTargetAtTime(1600, t, seconds / 3);
+    this.crowdGain.gain.setTargetAtTime(Math.min(this.crowdBase + 0.07, 0.25), t, seconds / 3);
+  },
+  crowdStop(ramp = 3) {
+    if (this.crowdGain) this.crowdGain.gain.setTargetAtTime(0.0001, this.now(), ramp / 3);
+  },
+
+  /* Applause: burst-modulated noise, swells in and fades out. */
+  applause(dur = 7) {
+    if (!this.ready) return;
+    const t0 = this.now();
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(3);
+    src.loop = true;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 2000; bp.Q.value = 0.7;
+
+    const clapMod = this.ctx.createGain();               // clap texture
+    clapMod.gain.value = 0.55;
+    const modOsc = this.ctx.createOscillator();
+    modOsc.type = "square"; modOsc.frequency.value = 11;
+    const modDepth = this.ctx.createGain();
+    modDepth.gain.value = 0.4;
+    modOsc.connect(modDepth).connect(clapMod.gain);
+
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(0.28, t0 + 0.9);
+    env.gain.setValueAtTime(0.28, t0 + dur - 2.5);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    src.connect(bp).connect(clapMod).connect(env).connect(this.master);
+    src.start(t0); src.stop(t0 + dur + 0.1);
+    modOsc.start(t0); modOsc.stop(t0 + dur + 0.1);
+  },
+
+  /* Soft two-note chime for the team point. */
+  chime() {
+    if (!this.ready) return;
+    [[659.25, 0], [880, 0.18]].forEach(([f, at]) => {
+      const t0 = this.now() + at;
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine"; osc.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
+      osc.connect(g).connect(this.master);
+      osc.start(t0); osc.stop(t0 + 1.2);
+    });
+  },
+};
+
+/* ---------------- wake lock ---------------- */
+const WakeLock = {
+  sentinel: null,
+  supported: "wakeLock" in navigator,
+  async acquire() {
+    if (!this.supported) return;
+    try {
+      this.sentinel = await navigator.wakeLock.request("screen");
+    } catch (e) { console.warn("wakeLock:", e.message); }
+  },
+  release() {
+    if (this.sentinel) { this.sentinel.release().catch(() => {}); this.sentinel = null; }
+  },
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && matchIsRunning()) WakeLock.acquire();
+  if (document.visibilityState === "visible") tick();
+});
+
+/* ---------------- match engine ---------------- */
+const STOPPAGE_NORMAL = 60, STOPPAGE_TEST = 10;
+
+function matchIsRunning() {
+  return !!match && ["live", "stoppage"].includes(App.state);
+}
+function elapsedSec() { return (Date.now() - match.kickoff) / 1000; }
+function remainingSec() { return match.durationSec - elapsedSec(); }
+
+function createMatch({ minutes, test = false }) {
+  const durationSec = test ? 120 : minutes * 60;
+  const stoppageSec = test ? STOPPAGE_TEST : STOPPAGE_NORMAL;
+  const w1s = test ? 60 : settings.w1 * 60;
+  const w2s = test ? 30 : settings.w2 * 60;
+  match = {
+    kickoff: Date.now(),
+    durationSec, stoppageSec,
+    w1s, w2s,
+    test,
+    // warnings that don't fit inside this match length are marked fired up front
+    fired: {
+      w1: w1s >= durationSec,
+      w2: w2s >= durationSec,
+      stoppage: stoppageSec >= durationSec,
+      fulltime: false,
+    },
+  };
+  saveMatch();
+}
+
+let tickTimer = null;
+function startTicking() {
+  clearInterval(tickTimer);
+  tickTimer = setInterval(tick, 200);
+  tick();
+}
+function stopTicking() { clearInterval(tickTimer); tickTimer = null; }
+
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+function tick() {
+  if (!match || !["live", "stoppage"].includes(App.state)) return;
+  const rem = remainingSec();
+  $("#sb-clock").textContent = fmtClock(elapsedSec());
+
+  // Collect events that have newly passed; announce only the most recent one
+  // (mirrors the reload rule: never replay old warnings).
+  const passed = [];
+  if (!match.fired.w1 && rem <= match.w1s) { match.fired.w1 = true; passed.push("w1"); }
+  if (!match.fired.w2 && rem <= match.w2s) { match.fired.w2 = true; passed.push("w2"); }
+  if (!match.fired.stoppage && rem <= match.stoppageSec) { match.fired.stoppage = true; passed.push("stoppage"); }
+  if (!match.fired.fulltime && rem <= 0) { match.fired.fulltime = true; passed.push("fulltime"); }
+  if (passed.length) { saveMatch(); fireEvent(passed[passed.length - 1]); }
+
+  if (App.state === "stoppage") renderStoppageCount(rem);
+}
+
+function fireEvent(ev) {
+  const t = T();
+  if (ev === "w1") {
+    AudioEngine.whistleShort();
+    showBanner(t.w1Banner(match.w1s), 7000);
+    highlightScoreboard();
+  } else if (ev === "w2") {
+    AudioEngine.whistleDouble();
+    AudioEngine.crowdLevel(0.16, 4);
+    showBanner(t.w2Banner(match.w2s), 7000);
+    highlightScoreboard();
+  } else if (ev === "stoppage") {
+    enterStoppage();
+  } else if (ev === "fulltime") {
+    enterFullTime();
+  }
+}
+
+function enterStoppage() {
+  App.set("stoppage", { force: App.state !== "live" });
+  $("#sb-status").textContent = T().stoppageStatus;
+  AudioEngine.whistleShort();
+  AudioEngine.crowdAnticipation(match.stoppageSec);
+  renderStoppageCount(remainingSec());
+}
+
+const RING_C = 213.6; // 2πr for r=34
+function renderStoppageCount(rem) {
+  const secs = Math.max(0, Math.ceil(rem));
+  $("#count-num").textContent = secs;
+  const frac = Math.min(1, Math.max(0, rem / match.stoppageSec));
+  $("#count-prog").style.strokeDashoffset = (RING_C * (1 - frac)).toFixed(1);
+}
+
+let fulltimeTimer = null;
+function enterFullTime({ silent = false } = {}) {
+  stopTicking();
+  App.set("fulltime", { force: true });
+  const t = T();
+  $("#sb-clock").textContent = fmtClock(match.durationSec);
+  $("#sb-status").textContent = t.fulltimeStatus;
+  $("#coach-praise").textContent = t.coachPraise;
+  $("#coach-continuity").textContent = t.coachContinuity;
+  $("#btn-smooth-stop").textContent = t.smoothStop;
+  $("#btn-quiet-home").textContent = t.quietHome;
+
+  if (!silent) {
+    AudioEngine.whistleFullTime();
+    AudioEngine.crowdStop(2);
+    setTimeout(() => AudioEngine.applause(8), 1200);
+    showBanner(t.fulltimeBanner, 8000);
+  }
+  const coachDelay = silent ? 100 : 2200;
+  setTimeout(() => $("#coach-card").classList.add("show"), coachDelay);
+  clearTimeout(fulltimeTimer);
+  fulltimeTimer = setTimeout(() => App.set("handoff"), silent ? 400 : 6500);
+}
+
+function completeHandoff() {
+  points += 1;
+  savePoints();
+  AudioEngine.chime();
+  celebrate();
+  showBanner(T().pointBanner, 3000);
+  finishMatch(2600);
+}
+function quietFinish() { finishMatch(150); }
+
+function finishMatch(delayMs) {
+  match = null;
+  saveMatch();
+  WakeLock.release();
+  AudioEngine.crowdStop(2);
+  setTimeout(() => {
+    resetMatchUI();
+    App.set("home", { force: true });
+  }, delayMs);
+}
+
+function resetMatchUI() {
+  $("#coach-card").classList.remove("show");
+  $("#banner").classList.remove("show");
+  $("#scoreboard").classList.remove("highlight");
+  $("#sb-status").textContent = "";
+  $("#celebrate").innerHTML = "";
+}
+
+/* ---------------- UI helpers ---------------- */
+let bannerTimer = null;
+function showBanner(text, ms) {
+  const b = $("#banner");
+  b.textContent = text;
+  b.classList.add("show");
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => b.classList.remove("show"), ms);
+}
+let hlTimer = null;
+function highlightScoreboard() {
+  $("#scoreboard").classList.add("highlight");
+  clearTimeout(hlTimer);
+  hlTimer = setTimeout(() => $("#scoreboard").classList.remove("highlight"), 9000);
+}
+function celebrate() {
+  const host = $("#celebrate");
+  host.innerHTML = "";
+  const emo = ["⭐", "✨", "🌟"];
+  for (let i = 0; i < 9; i++) {
+    const s = document.createElement("span");
+    s.textContent = emo[i % emo.length];
+    s.style.left = (12 + (i * 9) % 76) + "%";
+    s.style.bottom = (18 + (i * 13) % 30) + "%";
+    s.style.animationDelay = (i * 0.14) + "s";
+    host.appendChild(s);
+  }
+}
+
+/* ---------------- kickoff flow ---------------- */
+let setupMinutes = 90;
+
+function startMatch({ minutes, test = false }) {
+  AudioEngine.init();                       // must be inside the user gesture (iOS)
+  createMatch({ minutes, test });
+  resetMatchUI();
+  const t = T();
+  $("#stoppage-caption").textContent = t.stoppageCaption;
+  $("#sb-status").textContent = t.firstHalf;
+  $("#sb-clock").textContent = "00:00";
+  App.set("live", { force: true });
+  WakeLock.acquire();
+  AudioEngine.whistleKickoff();
+  AudioEngine.crowdStart(0.13);
+  setTimeout(() => AudioEngine.crowdLevel(0.09, 4), 4000); // brief swell, then settle
+  showBanner(t.kickoffBanner, 6000);
+  startTicking();
+}
+
+/* ---------------- reload restore ---------------- */
+function restore() {
+  if (!match) { App.set("home", { force: true }); return; }
+  const rem = remainingSec();
+
+  // A finished match abandoned for over 12h just goes home quietly.
+  if (rem < -12 * 3600) { match = null; saveMatch(); App.set("home", { force: true }); return; }
+
+  // Mark every already-passed event as fired WITHOUT replaying it.
+  if (rem <= match.w1s) match.fired.w1 = true;
+  if (rem <= match.w2s) match.fired.w2 = true;
+  if (rem <= match.stoppageSec) match.fired.stoppage = true;
+
+  const t = T();
+  $("#stoppage-caption").textContent = t.stoppageCaption;
+
+  if (rem <= 0) {
+    match.fired.fulltime = true;
+    saveMatch();
+    enterFullTime({ silent: true });
+  } else if (rem <= match.stoppageSec) {
+    saveMatch();
+    App.set("stoppage", { force: true });
+    $("#sb-status").textContent = t.stoppageStatus;
+    renderStoppageCount(rem);
+    WakeLock.acquire();
+    startTicking();
+    resumeAudioOnGesture("stoppage");
+  } else {
+    saveMatch();
+    App.set("live", { force: true });
+    $("#sb-status").textContent = t.firstHalf;
+    WakeLock.acquire();
+    startTicking();
+    resumeAudioOnGesture("live");
+  }
+}
+
+/* Audio can only start from a user gesture — after a reload, quietly resume
+   the crowd ambience on the first tap anywhere. */
+function resumeAudioOnGesture(phase) {
+  const handler = () => {
+    AudioEngine.init();
+    if (matchIsRunning()) {
+      AudioEngine.crowdStart(0.09);
+      if (App.state === "stoppage") AudioEngine.crowdAnticipation(Math.max(remainingSec(), 5));
+    }
+  };
+  document.addEventListener("pointerdown", handler, { once: true });
+}
+
+/* ---------------- hold-to-activate gate (3s) ---------------- */
+function holdGate(btn, onComplete, hintEl, hintText) {
+  let timer = null, start = 0;
+  const ring = btn.querySelector(".gate-ring");
+  const cancel = () => {
+    clearInterval(timer);
+    timer = null;
+    btn.classList.remove("holding");
+    ring.style.setProperty("--p", 0);
+  };
+  btn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    cancel();
+    start = Date.now();
+    btn.classList.add("holding");
+    if (hintEl) { hintEl.textContent = hintText(); }
+    timer = setInterval(() => {
+      const p = Math.min(1, (Date.now() - start) / 3000);
+      ring.style.setProperty("--p", p);
+      if (p >= 1) { cancel(); onComplete(); }
+    }, 50);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((ev) =>
+    btn.addEventListener(ev, cancel));
+}
+
+/* ---------------- rendering / i18n ---------------- */
+function renderHome() {
+  $("#points-value").textContent = points;
+}
+function applyLanguage() {
+  const t = T();
+  const he = settings.lang === "he";
+  document.documentElement.lang = he ? "he" : "en";
+  document.documentElement.dir = he ? "rtl" : "ltr";
+  $("#home-sub").textContent = t.homeSub;
+  $("#points-label").textContent = t.pointsLabel;
+  $("#home-start").textContent = t.start;
+  $("#setup-title").textContent = t.setupTitle;
+  document.querySelectorAll(".preset small").forEach((el) => (el.textContent = t.minutes));
+  $("#custom-label").textContent = t.customLabel;
+  $("#btn-kickoff").textContent = t.kickoffBtn;
+  $("#btn-setup-back").textContent = t.back;
+  $("#stoppage-caption").textContent = t.stoppageCaption;
+  $("#btn-smooth-stop").textContent = t.smoothStop;
+  $("#btn-quiet-home").textContent = t.quietHome;
+  document.querySelectorAll("#lang-seg button").forEach((b) =>
+    b.classList.toggle("selected", b.dataset.lang === settings.lang));
+}
+
+/* ---------------- wire up ---------------- */
+function bind() {
+  $("#home-start").addEventListener("click", () => App.set("setup"));
+  $("#btn-setup-back").addEventListener("click", () => App.set("home"));
+
+  document.querySelectorAll(".preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setupMinutes = Number(btn.dataset.min);
+      document.querySelectorAll(".preset").forEach((b) => b.classList.toggle("selected", b === btn));
+      $("#custom-row").classList.remove("selected");
+      $("#custom-min").value = "";
+    });
+  });
+  $("#custom-min").addEventListener("input", () => {
+    const v = Number($("#custom-min").value);
+    if (v >= 5 && v <= 240) {
+      setupMinutes = v;
+      document.querySelectorAll(".preset").forEach((b) => b.classList.remove("selected"));
+      $("#custom-row").classList.add("selected");
+    }
+  });
+  $("#btn-kickoff").addEventListener("click", () => startMatch({ minutes: setupMinutes }));
+
+  $("#btn-smooth-stop").addEventListener("click", completeHandoff);
+  $("#btn-quiet-home").addEventListener("click", quietFinish);
+
+  // parent settings gate (hold 3s)
+  holdGate($("#btn-gate"), () => App.set("settings"), $("#gate-hint"), () => T().gateHint);
+
+  // parent skip-ahead on the match screen (hold 3s) — jumps forward to the
+  // start of stoppage time. It can only shorten a match, never extend it.
+  holdGate($("#btn-skip"), () => {
+    if (!matchIsRunning()) return;
+    const rem = remainingSec();
+    if (rem > match.stoppageSec) {
+      match.kickoff -= (rem - match.stoppageSec) * 1000;
+      saveMatch();
+      tick();
+    }
+  }, null, () => "");
+
+  // settings
+  document.querySelectorAll("#lang-seg button").forEach((b) =>
+    b.addEventListener("click", () => {
+      settings.lang = b.dataset.lang;
+      saveSettings();
+      applyLanguage();
+    }));
+  const vol = $("#volume");
+  vol.value = settings.volume;
+  vol.addEventListener("input", () => {
+    settings.volume = Number(vol.value);
+    saveSettings();
+    AudioEngine.setVolume(settings.volume / 100);
+  });
+  const w1 = $("#warn1"), w2 = $("#warn2");
+  w1.value = settings.w1; w2.value = settings.w2;
+  w1.addEventListener("change", () => { settings.w1 = Number(w1.value); saveSettings(); });
+  w2.addEventListener("change", () => { settings.w2 = Number(w2.value); saveSettings(); });
+
+  $("#btn-test-match").addEventListener("click", () => startMatch({ minutes: 2, test: true }));
+
+  const resetBtn = $("#btn-reset-points");
+  let armed = false, armTimer = null;
+  resetBtn.addEventListener("click", () => {
+    if (!armed) {
+      armed = true;
+      resetBtn.classList.add("confirm");
+      resetBtn.textContent = "Tap again to confirm reset";
+      armTimer = setTimeout(() => {
+        armed = false;
+        resetBtn.classList.remove("confirm");
+        resetBtn.textContent = "Reset points to 0";
+      }, 4000);
+    } else {
+      clearTimeout(armTimer);
+      armed = false;
+      points = 0;
+      savePoints();
+      renderHome();
+      resetBtn.classList.remove("confirm");
+      resetBtn.textContent = "Points reset ✓";
+      setTimeout(() => (resetBtn.textContent = "Reset points to 0"), 2000);
+    }
+  });
+
+  $("#btn-settings-close").addEventListener("click", () => App.set("home"));
+
+  if (!WakeLock.supported) {
+    $("#wakelock-ok").style.display = "none";
+    $("#wakelock-warn").classList.add("show");
+  }
+
+  // scatter a few stars in the stadium sky
+  const stadium = document.querySelector(".stadium");
+  for (let i = 0; i < 14; i++) {
+    const s = document.createElement("div");
+    s.className = "star";
+    s.style.left = ((i * 37) % 96 + 2) + "%";
+    s.style.top = ((i * 23) % 26 + 3) + "%";
+    s.style.animationDelay = (i * 0.4) + "s";
+    stadium.appendChild(s);
+  }
+}
+
+/* ---------------- developer test hooks (not reachable from the UI) ----------------
+   advance() only moves the kickoff EARLIER, i.e. it can only move a match
+   closer to full time. There is no API to add time. */
+Object.defineProperty(window, "__matchDayTestHooks", {
+  value: Object.freeze({
+    getState: () => App.state,
+    getMatch: () => (match ? JSON.parse(JSON.stringify(match)) : null),
+    getPoints: () => points,
+    advance(seconds) {
+      if (!match) throw new Error("no active match");
+      if (!(seconds > 0)) throw new Error("advance() only accepts positive seconds");
+      match.kickoff -= seconds * 1000;
+      saveMatch();
+      tick();
+    },
+  }),
+  writable: false, configurable: false, enumerable: false,
+});
+
+/* ---------------- boot ---------------- */
+bind();
+applyLanguage();
+renderHome();
+restore();
+</script>
+</body>
+</html>
