@@ -1,5 +1,7 @@
 # Match Day
 
+A companion app for calm screen-time transitions: it turns the end of watching time into the familiar, predictable end of a soccer match.
+
 ## How to run it tonight
 
 `index.html` is the whole app — no build, no dependencies, works offline once loaded.
