@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a1020">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
 <title>Match Day</title>
 <style>
   :root {
@@ -542,6 +544,30 @@
     touch-action: manipulation;
   }
   .keypad button:active { background: var(--bg-card-2); }
+  .pin-forgot {
+    position: relative;
+    display: none;
+    width: 100%;
+    margin-top: 14px;
+    padding: 12px;
+    font-size: 14px;
+    color: var(--text-dim);
+    touch-action: none;
+    -webkit-touch-callout: none;
+  }
+  .pin-forgot.shown { display: block; }
+  .pin-forgot .gate-ring {
+    position: absolute;
+    inset: auto 20% 4px 20%;
+    height: 3px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--ring) calc(var(--p, 0) * 100%), rgba(255,255,255,0.12) 0);
+    -webkit-mask: none;
+    mask: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .pin-forgot.holding .gate-ring { opacity: 1; }
 
   .mc-remaining { text-align: center; font-size: 15px; color: var(--text-dim); margin-top: 4px; }
   .mc-remaining b { color: var(--text); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
@@ -757,6 +783,10 @@
         <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
         <button data-k="back" aria-label="Delete digit">⌫</button><button data-k="0">0</button><button data-k="cancel" aria-label="Cancel">✕</button>
       </div>
+      <button class="pin-forgot" id="pin-forgot" aria-label="Forgot PIN — press and hold to set a new one">
+        Forgot PIN? Hold 3 seconds
+        <span class="gate-ring"></span>
+      </button>
     </div>
   </div>
 
@@ -1416,15 +1446,18 @@ function closeModal(sel) { $(sel).classList.remove("open"); }
 const PinPad = {
   buf: "",
   onDone: null,
-  open({ title, sub = "", onDone }) {
+  onForgot: null,
+  open({ title, sub = "", onDone, onForgot = null }) {
     this.buf = "";
     this.onDone = onDone;
+    this.onForgot = onForgot;
     $("#pin-title").textContent = title;
     $("#pin-sub").textContent = sub;
+    $("#pin-forgot").classList.toggle("shown", !!onForgot);
     this.render();
     $("#pin-modal").classList.add("open");
   },
-  close() { closeModal("#pin-modal"); this.onDone = null; },
+  close() { closeModal("#pin-modal"); this.onDone = null; this.onForgot = null; },
   render() {
     document.querySelectorAll("#pin-dots span").forEach((d, i) =>
       d.classList.toggle("filled", i < this.buf.length));
@@ -1470,6 +1503,10 @@ function requestPin(onOk) {
       if (pin === settings.pin) { PinPad.close(); onOk(); }
       else PinPad.reject();
     },
+    // escape hatch: without this, a forgotten PIN during a paused match has
+    // no way out (settings live on the home screen). A 3-second hold is the
+    // same accidental-child barrier as the settings gate itself.
+    onForgot() { setPinFlow(onOk); },
   });
 }
 
@@ -1580,6 +1617,9 @@ function bind() {
   });
   document.querySelectorAll("#pin-keypad button").forEach((b) =>
     b.addEventListener("click", () => PinPad.key(b.dataset.k)));
+  holdGate($("#pin-forgot"), () => {
+    if (PinPad.onForgot) { const f = PinPad.onForgot; PinPad.close(); f(); }
+  }, null, () => "");
   $("#pin-modal").addEventListener("click", (e) => {
     if (e.target === $("#pin-modal")) PinPad.close();
   });
@@ -1613,6 +1653,14 @@ function bind() {
     settings.volume = Number(vol.value);
     saveSettings();
     AudioEngine.setVolume(settings.volume / 100);
+  });
+  // releasing the slider previews the new level with a soft short whistle,
+  // so volume can be set without starting a match
+  vol.addEventListener("change", () => {
+    if (App.state !== "settings") return;
+    AudioEngine.init();
+    AudioEngine.setVolume(settings.volume / 100);
+    AudioEngine.whistle({ dur: 0.25, vol: 0.22 });
   });
   const w1 = $("#warn1"), w2 = $("#warn2");
   w1.value = settings.w1; w2.value = settings.w2;
