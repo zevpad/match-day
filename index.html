@@ -953,7 +953,6 @@ const App = {
 /* ---------------- audio engine (all sounds synthesized) ---------------- */
 const AudioEngine = {
   ctx: null, master: null,
-  crowd: null, crowdBase: 0,
 
   init() {
     if (this.ctx) { if (this.ctx.state === "suspended") this.ctx.resume(); return; }
@@ -970,16 +969,10 @@ const AudioEngine = {
     if (this.master) this.master.gain.setTargetAtTime(v01, this.now(), 0.1);
   },
 
-  noiseBuffer(seconds = 2) {
-    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * seconds, this.ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    return buf;
-  },
-
   /* Referee pea-whistle: two detuned oscillators + fast warble. */
   whistle({ at = 0, dur = 0.5, freq = 2250, vol = 0.4 } = {}) {
     if (!this.ready) return;
+    Song.duck(1.5);                          // the song steps back so the whistle reads clearly
     const t0 = this.now() + at;
     const env = this.ctx.createGain();
     env.gain.setValueAtTime(0.0001, t0);
@@ -1016,208 +1009,79 @@ const AudioEngine = {
     this.whistle({ at: 1.0,  dur: 1.1, freq: 2050, vol: 0.36 });
   },
 
-  /* Stadium crowd ambience, four layers:
-       1. base roar — bandpassed noise (≈500–2000 Hz) through vocal formant
-          peaks at 800/1400/2600 Hz, so the energy sits in the human-voice band
-       2. "many voices" flutter — the roar's gain is the sum of three random
-          walks (slow tide ~0.1 Hz, medium ~1–2 Hz, fast irregular ~5–10 Hz);
-          the fast shallow flutter is what reads as thousands of people
-       3. voice shimmer — 12 quiet detuned triangles (180–420 Hz) with slow
-          independent pitch drift and AM, mixed ~20 dB under the roar
-       4. events — a gentle swell every 10–25 s, sometimes with a soft
-          distant-cheer burst (2–4 kHz noise)
-     All movement is ramped; nothing steps abruptly. */
-  crowdStart(level = 0.1) {
-    if (!this.ready) return;
-    if (this.crowd) { this.crowdLevel(level); return; }
-    const ctx = this.ctx;
-    const rnd = (a, b) => a + Math.random() * (b - a);
-    this.duckFactor = 1;
-    const c = this.crowd = {
-      walkers: [], voices: [], csources: [],
-      fastDepth: 0.12, swellMin: 10, swellMax: 25,
-    };
-    const walker = (fn, minMs, maxMs) => {
-      const w = { id: null, alive: true };
-      const loop = () => {
-        if (!w.alive || this.crowd !== c) return;
-        fn();
-        w.id = setTimeout(loop, rnd(minMs, maxMs));
-      };
-      w.id = setTimeout(loop, rnd(0, minMs));   // randomize phase on each start
-      c.walkers.push(w);
-    };
+};
 
-    c.out = ctx.createGain();
-    c.out.gain.value = 0.0001;
-    c.out.connect(this.master);
+/* ---------------- final-stretch song ----------------
+   One song, every match, no exceptions. It starts exactly (song duration)
+   before full time, so its natural ending lands on the final whistle — the
+   song itself is the countdown. The match is otherwise silent apart from
+   the referee whistle. An empty SONG_DATA disables the song entirely. */
+const SONG_DATA = "";              // base64 data URI of the anthem (embedded at build time)
+const SONG_LEVEL = 0.35;           // moderate, under the master volume
 
-    // 1) base roar
-    c.src = ctx.createBufferSource();
-    c.src.buffer = this.noiseBuffer(3);
-    c.src.loop = true;
-    const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass";
-    bp.frequency.value = 1000;                  // passband ≈ 500–2000 Hz
-    bp.Q.value = 0.67;
-    let head = c.src; head.connect(bp); head = bp;
-    [[800, 5], [1400, 5], [2600, 4]].forEach(([f, g]) => {
-      const p = ctx.createBiquadFilter();
-      p.type = "peaking"; p.frequency.value = f; p.gain.value = g; p.Q.value = 2;
-      head.connect(p); head = p;
-    });
-    c.roar = ctx.createGain();
-    c.roar.gain.value = 1.0;                    // flutter walks around 1.0
-    c.swell = ctx.createGain();
-    c.swell.gain.value = 1.0;
-    c.makeup = ctx.createGain();
-    c.makeup.gain.value = 0.54;                 // match the loudness of the original lowpass crowd
-    head.connect(c.roar).connect(c.swell).connect(c.makeup).connect(c.out);
-    c.src.start();
+const Song = {
+  buffer: null, source: null, gain: null,
+  playing: false, loading: false,
 
-    // 2) flutter: three random walks summed into the roar gain
-    const flutter = (depthFn, tc, minMs, maxMs) => {
-      const cs = ctx.createConstantSource();
-      cs.offset.value = 0;
-      cs.connect(c.roar.gain);
-      cs.start();
-      c.csources.push(cs);
-      walker(() => {
-        const d = depthFn();
-        cs.offset.setTargetAtTime(rnd(-d, d), ctx.currentTime, tc);
-      }, minMs, maxMs);
-    };
-    flutter(() => 0.18, 2.5, 4000, 9000);         // slow tide of the crowd (~0.1 Hz)
-    flutter(() => 0.15, 0.3, 350, 750);           // medium (~1–2 Hz)
-    flutter(() => c.fastDepth, 0.05, 90, 190);    // fast, irregular, shallow (~5–10 Hz)
-
-    // 3) voice shimmer
-    c.shimmerBus = ctx.createGain();
-    c.shimmerBus.gain.value = 0.10;               // ≈ -20 dB under the roar
-    c.shimmerBus.connect(c.swell);
-    for (let i = 0; i < 12; i++) {
-      const osc = ctx.createOscillator();
-      osc.type = "triangle";
-      const f0 = rnd(180, 420);
-      osc.frequency.value = f0;
-      const vg = ctx.createGain();
-      const amp = rnd(0.03, 0.07);
-      vg.gain.value = amp * rnd(0.3, 1);
-      osc.connect(vg).connect(c.shimmerBus);
-      osc.start();
-      c.voices.push(osc);
-      walker(() => {
-        const t = ctx.currentTime;
-        osc.frequency.setTargetAtTime(f0 * Math.pow(2, rnd(-20, 20) / 1200), t, 1.5);
-        vg.gain.setTargetAtTime(amp * rnd(0.25, 1), t, 1.2);
-      }, 1800, 4500);
+  async load(src = SONG_DATA) {
+    if (this.buffer || this.loading || !src || !AudioEngine.ready) return;
+    this.loading = true;
+    try {
+      const ab = await (await fetch(src)).arrayBuffer();
+      this.buffer = await AudioEngine.ctx.decodeAudioData(ab);
+    } catch (e) {
+      console.warn("song load failed:", e.message);
     }
+    this.loading = false;
+  },
+  duration() { return this.buffer ? this.buffer.duration : 0; },
 
-    // 4) events: gentle swells, occasionally with a distant-cheer burst
-    const swellOnce = () => {
-      const t = ctx.currentTime;
-      c.swell.gain.cancelScheduledValues(t);
-      c.swell.gain.setValueAtTime(c.swell.gain.value, t);
-      c.swell.gain.linearRampToValueAtTime(1.41, t + 2);      // ≈ +3 dB over 2 s
-      c.swell.gain.setTargetAtTime(1.0, t + 2, 1.0);          // decay ≈ 3 s
-      if (Math.random() < 1 / 3) {
-        const b = ctx.createBufferSource();
-        b.buffer = this.noiseBuffer(1);
-        const cf = ctx.createBiquadFilter();
-        cf.type = "bandpass"; cf.frequency.value = 2800; cf.Q.value = 1.1;
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.linearRampToValueAtTime(0.05, t + 0.2);        // soft attack
-        g.gain.setTargetAtTime(0.0001, t + 0.3, 0.15);
-        b.connect(cf).connect(g).connect(c.out);
-        b.start(t); b.stop(t + 0.9);
-      }
+  /* Called from tick(): the song timeline follows the match clock, so this
+     also restarts it at the right position after a pause or a reload.
+     song position = song duration − time remaining. */
+  syncToMatch() {
+    if (!this.buffer || this.playing || !match || isPaused() || !matchIsRunning()) return;
+    const rem = remainingSec();
+    if (rem <= 0 || rem > this.duration()) return;
+    this.play(this.duration() - rem);
+  },
+  play(offset) {
+    if (!this.buffer || this.playing || !AudioEngine.ready) return;
+    const ctx = AudioEngine.ctx, t = ctx.currentTime;
+    this.gain = ctx.createGain();
+    this.gain.gain.setValueAtTime(0.0001, t);
+    // fresh start fades in over 2 s; a mid-song resume comes back quicker
+    this.gain.gain.linearRampToValueAtTime(SONG_LEVEL, t + (offset < 1 ? 2 : 0.8));
+    this.gain.connect(AudioEngine.master);
+    this.source = ctx.createBufferSource();
+    this.source.buffer = this.buffer;
+    this.source.connect(this.gain);
+    this.source.start(t, Math.min(Math.max(0, offset), Math.max(0, this.duration() - 0.05)));
+    this.playing = true;
+    const g = this.gain;
+    this.source.onended = () => {
+      this.playing = false;
+      setTimeout(() => g.disconnect(), 1500);  // no orphaned nodes on the master bus
     };
-    const nextSwell = () => {
-      if (this.crowd !== c) return;
-      c.swellId = setTimeout(() => { swellOnce(); nextSwell(); },
-                             rnd(c.swellMin, c.swellMax) * 1000);
-    };
-    nextSwell();
-
-    this.crowdLevel(level, 2.5);
   },
-  crowdLevel(level, ramp = 2) {
-    if (!this.crowd) return;
-    this.crowdBase = level;
-    this.crowd.out.gain.setTargetAtTime(level * this.duckFactor, this.now(), ramp / 3);
+  stop(fade = 1) {
+    if (!this.playing || !this.gain) return;
+    const t = AudioEngine.ctx.currentTime;
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setValueAtTime(this.gain.gain.value, t);
+    this.gain.gain.linearRampToValueAtTime(0.0001, t + fade);
+    try { this.source.stop(t + fade + 0.05); } catch {}
+    this.playing = false;
   },
-  /* Pause duck: the stadium settles down ~4 dB while the physio is on. */
-  duckFactor: 1,
-  crowdDuck(on, ramp = 1.5) {
-    this.duckFactor = on ? 0.63 : 1;
-    if (this.crowd)
-      this.crowd.out.gain.setTargetAtTime(this.crowdBase * this.duckFactor, this.now(), ramp / 3);
-  },
-  /* Stoppage anticipation: deeper fast flutter + more frequent swells —
-     the crowd gets busier, not louder. */
-  crowdAnticipation() {
-    if (!this.crowd) return;
-    this.crowd.fastDepth = 0.2;
-    this.crowd.swellMin = 5;
-    this.crowd.swellMax = 11;
-  },
-  crowdStop(ramp = 3) {
-    const c = this.crowd;
-    if (!c) return;
-    this.crowd = null;                          // walkers/swell see this and stop rescheduling
-    c.out.gain.setTargetAtTime(0.0001, this.now(), ramp / 3);
-    setTimeout(() => {
-      c.walkers.forEach((w) => { w.alive = false; clearTimeout(w.id); });
-      clearTimeout(c.swellId);
-      [c.src, ...c.voices, ...c.csources].forEach((n) => { try { n.stop(); } catch {} });
-      c.out.disconnect();
-    }, ramp * 1000 + 1500);
-  },
-
-  /* Applause: burst-modulated noise, swells in and fades out. */
-  applause(dur = 7) {
-    if (!this.ready) return;
-    const t0 = this.now();
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.noiseBuffer(3);
-    src.loop = true;
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = "bandpass"; bp.frequency.value = 2000; bp.Q.value = 0.7;
-
-    const clapMod = this.ctx.createGain();               // clap texture
-    clapMod.gain.value = 0.55;
-    const modOsc = this.ctx.createOscillator();
-    modOsc.type = "square"; modOsc.frequency.value = 11;
-    const modDepth = this.ctx.createGain();
-    modDepth.gain.value = 0.4;
-    modOsc.connect(modDepth).connect(clapMod.gain);
-
-    const env = this.ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t0);
-    env.gain.exponentialRampToValueAtTime(0.28, t0 + 0.9);
-    env.gain.setValueAtTime(0.28, t0 + dur - 2.5);
-    env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-
-    src.connect(bp).connect(clapMod).connect(env).connect(this.master);
-    src.start(t0); src.stop(t0 + dur + 0.1);
-    modOsc.start(t0); modOsc.stop(t0 + dur + 0.1);
-  },
-
-  /* Soft two-note chime for the team point. */
-  chime() {
-    if (!this.ready) return;
-    [[659.25, 0], [880, 0.18]].forEach(([f, at]) => {
-      const t0 = this.now() + at;
-      const osc = this.ctx.createOscillator();
-      osc.type = "sine"; osc.frequency.value = f;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
-      osc.connect(g).connect(this.master);
-      osc.start(t0); osc.stop(t0 + 1.2);
-    });
+  /* −4 dB for ~1.5 s around each whistle so the whistle reads clearly. */
+  duck(seconds = 1.5) {
+    if (!this.playing || !this.gain) return;
+    const t = AudioEngine.ctx.currentTime;
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setValueAtTime(this.gain.gain.value, t);
+    this.gain.gain.linearRampToValueAtTime(SONG_LEVEL * 0.63, t + 0.15);
+    this.gain.gain.setValueAtTime(SONG_LEVEL * 0.63, t + seconds);
+    this.gain.gain.linearRampToValueAtTime(SONG_LEVEL, t + seconds + 0.6);
   },
 };
 
@@ -1310,6 +1174,7 @@ function tick() {
 
   if (App.state === "stoppage") renderStoppageCount(rem);
   if (match && $("#mc-modal").classList.contains("open")) renderMCPanel();
+  Song.syncToMatch();
 }
 
 function fireEvent(ev) {
@@ -1320,7 +1185,6 @@ function fireEvent(ev) {
     highlightScoreboard();
   } else if (ev === "w2") {
     AudioEngine.whistleDouble();
-    AudioEngine.crowdLevel(0.16, 4);
     showBanner(t.w2Banner(match.w2s), 7000);
     highlightScoreboard();
   } else if (ev === "stoppage") {
@@ -1348,7 +1212,7 @@ function pauseMatch() {
   match.pausedAt = Date.now();
   saveMatch();
   applyPauseUI(true);
-  AudioEngine.crowdDuck(true);
+  Song.stop(0.8);              // resumes from the right position on resume
   tick();
 }
 
@@ -1358,8 +1222,7 @@ function resumeMatch() {
   match.pausedAt = null;
   saveMatch();
   applyPauseUI(false);
-  AudioEngine.crowdDuck(false);
-  tick();
+  tick();                      // Song.syncToMatch restarts the song at the clock position
 }
 
 function endMatchNow() {
@@ -1372,14 +1235,13 @@ function endMatchNow() {
   match.endedAt = Math.floor(elapsedSec());
   match.fired.w1 = match.fired.w2 = match.fired.stoppage = match.fired.fulltime = true;
   saveMatch();
-  enterFullTime();          // the normal ritual: whistle, applause, coach, handoff
+  enterFullTime();          // the normal ritual: whistle, coach card, handoff
 }
 
 function enterStoppage() {
   App.set("stoppage", { force: App.state !== "live" });
   $("#sb-status").textContent = T().stoppageStatus;
   AudioEngine.whistleShort();
-  AudioEngine.crowdAnticipation(match.stoppageSec);
   renderStoppageCount(remainingSec());
 }
 
@@ -1395,7 +1257,6 @@ let fulltimeTimer = null;
 function enterFullTime({ silent = false } = {}) {
   stopTicking();
   applyPauseUI(false);
-  AudioEngine.crowdDuck(false);
   closeModal("#mc-modal");
   closeModal("#pin-modal");
   App.set("fulltime", { force: true });
@@ -1408,9 +1269,10 @@ function enterFullTime({ silent = false } = {}) {
   $("#btn-quiet-home").textContent = t.quietHome;
 
   if (!silent) {
+    // hard-stop safety: if the song hasn't ended by full time (duration
+    // mismatch), it fades out over 1 s under the final whistle
+    Song.stop(1);
     AudioEngine.whistleFullTime();
-    AudioEngine.crowdStop(2);
-    setTimeout(() => AudioEngine.applause(8), 1200);
     showBanner(t.fulltimeBanner, 8000);
   }
   const coachDelay = silent ? 100 : 2200;
@@ -1422,7 +1284,6 @@ function enterFullTime({ silent = false } = {}) {
 function completeHandoff() {
   points += 1;
   savePoints();
-  AudioEngine.chime();
   celebrate();
   showBanner(T().pointBanner, 3000);
   finishMatch(2600);
@@ -1433,7 +1294,7 @@ function finishMatch(delayMs) {
   match = null;
   saveMatch();
   WakeLock.release();
-  AudioEngine.crowdStop(2);
+  Song.stop(1);
   setTimeout(() => {
     resetMatchUI();
     App.set("home", { force: true });
@@ -1492,8 +1353,7 @@ function startMatch({ minutes, test = false }) {
   App.set("live", { force: true });
   WakeLock.acquire();
   AudioEngine.whistleKickoff();
-  AudioEngine.crowdStart(0.13);
-  setTimeout(() => AudioEngine.crowdLevel(0.09, 4), 4000); // brief swell, then settle
+  Song.load();                 // decode now so its duration is known well before the final stretch
   showBanner(t.kickoffBanner, 6000);
   startTicking();
 }
@@ -1527,7 +1387,7 @@ function restore() {
     if (match.pausedAt) applyPauseUI(true);   // a paused match restores as paused
     WakeLock.acquire();
     startTicking();
-    resumeAudioOnGesture("stoppage");
+    resumeAudioOnGesture();
   } else {
     saveMatch();
     App.set("live", { force: true });
@@ -1535,20 +1395,17 @@ function restore() {
     if (match.pausedAt) applyPauseUI(true);   // a paused match restores as paused
     WakeLock.acquire();
     startTicking();
-    resumeAudioOnGesture("live");
+    resumeAudioOnGesture();
   }
 }
 
-/* Audio can only start from a user gesture — after a reload, quietly resume
-   the crowd ambience on the first tap anywhere. */
-function resumeAudioOnGesture(phase) {
+/* Audio can only start from a user gesture — after a reload, the first tap
+   anywhere re-arms it. If the match is in the final-stretch window, the next
+   tick resumes the song at the correct offset (visuals never wait for this). */
+function resumeAudioOnGesture() {
   const handler = () => {
     AudioEngine.init();
-    if (matchIsRunning()) {
-      AudioEngine.crowdStart(0.09);
-      if (App.state === "stoppage") AudioEngine.crowdAnticipation(Math.max(remainingSec(), 5));
-      if (isPaused()) AudioEngine.crowdDuck(true, 0.1);
-    }
+    Song.load().then(() => tick());
   };
   document.addEventListener("pointerdown", handler, { once: true });
 }
